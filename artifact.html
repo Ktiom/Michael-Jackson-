@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Путь Звезды - Игра</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Отключаем системные жесты для удобства управления на мобильных */
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Небольшой эффект свечения для текста */
+        .text-glow {
+            text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
+        }
+    </style>
+</head>
+<body class="text-white select-none">
+
+    <div id="game-container" class="relative w-full h-screen">
+        <!-- Игровой холст -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- Мобильное управление (Скрыто на больших экранах) -->
+        <div id="touch-controls" class="absolute bottom-8 left-0 w-full px-6 flex justify-between z-40 md:hidden">
+            <div class="flex gap-4">
+                <button id="btn-left" class="w-16 h-16 bg-white/10 border-2 border-white/30 rounded-full flex items-center justify-center text-white text-3xl backdrop-blur-md active:bg-white/30 active:scale-90 transition-all shadow-lg">←</button>
+                <button id="btn-right" class="w-16 h-16 bg-white/10 border-2 border-white/30 rounded-full flex items-center justify-center text-white text-3xl backdrop-blur-md active:bg-white/30 active:scale-90 transition-all shadow-lg">→</button>
+            </div>
+            <button id="btn-jump" class="w-16 h-16 bg-white/10 border-2 border-white/30 rounded-full flex items-center justify-center text-white text-3xl backdrop-blur-md active:bg-white/30 active:scale-90 transition-all shadow-lg">↑</button>
+        </div>
+
+        <!-- Стартовый экран -->
+        <div id="start-modal" class="absolute inset-0 bg-gray-900 flex flex-col items-center justify-center p-6 z-50">
+            <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-200 mb-6 text-center text-glow">Путь Звезды</h1>
+            <p class="text-lg md:text-xl text-gray-300 mb-12 max-w-2xl text-center leading-relaxed">
+                Помогите Майклу пройти путь от мечтательного мальчика до Поп-Короля.<br>
+                Перепрыгивайте препятствия на пути к сцене и узнайте больше об уникальной особенности — витилиго.
+            </p>
+            <p class="text-gray-400 mb-6 text-sm">Управление: Стрелки / WASD + Пробел для прыжка</p>
+            <button id="btn-start" class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-4 px-12 rounded-full text-2xl shadow-[0_0_20px_rgba(234,179,8,0.4)] transition-transform hover:scale-105 active:scale-95">Начать игру</button>
+        </div>
+
+        <!-- Информационная плашка (Витилиго) -->
+        <div id="info-modal" class="hidden absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-50 backdrop-blur-md transition-opacity">
+            <div class="bg-gray-800 border-2 border-gray-600 rounded-3xl p-8 max-w-xl w-full text-center shadow-2xl relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-yellow-400 to-yellow-200"></div>
+                <h2 id="info-title" class="text-3xl md:text-4xl font-bold text-yellow-400 mb-6 mt-4">Заголовок</h2>
+                <p id="info-text" class="text-gray-200 text-lg md:text-xl leading-relaxed mb-10">Текст...</p>
+                <button id="btn-next" class="bg-white hover:bg-gray-200 text-black font-bold py-3 px-10 rounded-full text-xl transition-transform active:scale-95 shadow-lg">Продолжить путь</button>
+            </div>
+        </div>
+
+        <!-- Экран победы -->
+        <div id="end-modal" class="hidden absolute inset-0 bg-gray-900 flex flex-col items-center justify-center p-6 z-50">
+            <h1 class="text-5xl md:text-7xl font-black text-white mb-6 text-center">Вы стали Легендой!</h1>
+            <p class="text-xl text-gray-300 mb-12 max-w-2xl mx-auto text-center">
+                Майкл добрался до гримерки, оставив за собой толпу восхищенных поклонников. 
+                Спасибо, что прошли этот путь и узнали, что витилиго — это не преграда для мечты, а часть уникальности!
+            </p>
+            <button id="btn-restart" class="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-4 px-12 rounded-full text-2xl shadow-lg transition-transform hover:scale-105 active:scale-95">Играть снова</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Глобальные переменные и константы
+        const WORLD_HEIGHT = 800; 
+        let scale = 1;
+        let gameState = 'START'; // START, PLAYING, INFO, END
+        let currentLevelIndex = 0;
+        let lastTime = performance.now();
+        let particles = [];
+
+        // Физика
+        const GRAVITY = 0.7;
+        const JUMP_POWER = -15;
+        const SPEED = 1.5; 
+        const FRICTION = 0.85; 
+
+        // Игрок и камера (добавлены переменные для анимации)
+        const player = { x: 100, y: 400, width: 40, height: 80, velocityX: 0, velocityY: 0, grounded: false, animTime: 0, lastDir: 1 };
+        const camera = { x: 0 };
+        const keys = { left: false, right: false, up: false };
+
+        // Тексты плашек про Витилиго
+        const vitiligoData = [
+            {
+                title: "Что такое витилиго?",
+                content: "Витилиго — это состояние кожи, при котором она теряет свой естественный пигмент (меланин). Из-за этого на теле появляются светлые, обесцвеченные пятна. Это аутоиммунное явление, когда иммунная система по ошибке перестает вырабатывать пигмент. Оно может начаться в любом возрасте, даже когда ты еще совсем ребенок."
+            },
+            {
+                title: "Симптомы и Диагностика",
+                content: "Главный симптом очевиден — это белые, четко очерченные пятна на коже, которые со временем могут расти и сливаться. Диагностика проста: дерматолог осматривает кожу. Часто применяется ультрафиолетовая «лампа Вуда», в свете которой пятна витилиго ярко светятся, чтобы точно отличить их от других состояний."
+            },
+            {
+                title: "Уникальность, а не болезнь",
+                content: "Важно понять: витилиго абсолютно безопасно для жизни, не болит и им невозможно заразиться! Это не болезнь в привычном понимании, а уникальная особенность внешности. Принятие себя и бодипозитив — вот ключи к счастью. Помните: ничто не может остановить вас на пути к мечте!"
+            }
+        ];
+
+        const levels = [
+            // Уровень 1: Ребенок, паркур по улицам
+            {
+                name: "Уровень 1: Улицы родного города",
+                groundColor: "#334155",
+                groundTop: "#475569",
+                bgColor: "#0f172a",
+                goalColor: "#fef08a",
+                platforms: [
+                    {x: 0, y: 650, w: 800, h: 200},
+                    {x: 900, y: 650, w: 600, h: 200},
+                    {x: 1700, y: 550, w: 300, h: 300}, 
+                    {x: 2150, y: 650, w: 800, h: 200}
+                ],
+                obstacles: [
+                    {x: 500, y: 570, w: 50, h: 80, type: 'trash'}, 
+                    {x: 1200, y: 570, w: 50, h: 80, type: 'trash'},
+                    {x: 1400, y: 570, w: 50, h: 80, type: 'trash'},
+                    {x: 1800, y: 470, w: 50, h: 80, type: 'trash'}
+                ],
+                goal: {x: 2750, y: 350, w: 150, h: 300, text: "К СЦЕНЕ", type: 'stage'}
+            },
+            // Уровень 2: Подросток, появились пятна, кулисы
+            {
+                name: "Уровень 2: За кулисами",
+                groundColor: "#451a03", // Деревянный пол
+                groundTop: "#78350f",
+                bgColor: "#111827",
+                goalColor: "#38bdf8",
+                platforms: [
+                    {x: 0, y: 650, w: 500, h: 200},
+                    {x: 650, y: 550, w: 250, h: 20}, 
+                    {x: 1050, y: 450, w: 250, h: 20},
+                    {x: 1450, y: 650, w: 700, h: 200},
+                    {x: 2300, y: 600, w: 800, h: 250} 
+                ],
+                obstacles: [
+                    {x: 1600, y: 530, w: 80, h: 120, type: 'crate'}, 
+                    {x: 1900, y: 530, w: 80, h: 120, type: 'crate'}
+                ],
+                goal: {x: 2900, y: 200, w: 100, h: 400, text: "НА СЦЕНУ", type: 'curtain'}
+            },
+            // Уровень 3: Взрослый, Поп-Король, убегает от фанатов
+            {
+                name: "Уровень 3: Легенда Сцены",
+                groundColor: "#020617",
+                groundTop: "#1e293b",
+                bgColor: "#000000",
+                goalColor: "#10b981", 
+                platforms: [
+                    {x: 0, y: 600, w: 3200, h: 200} 
+                ],
+                obstacles: [
+                    {x: 800, y: 520, w: 40, h: 80, type: 'moving', speed: 3, minX: 600, maxX: 1000},
+                    {x: 1300, y: 520, w: 40, h: 80, type: 'moving', speed: 4, minX: 1100, maxX: 1600},
+                    {x: 2000, y: 520, w: 40, h: 80, type: 'moving', speed: 6, minX: 1800, maxX: 2300},
+                    {x: 2500, y: 520, w: 40, h: 80, type: 'moving', speed: 4, minX: 2400, maxX: 2700}
+                ],
+                goal: {x: 3000, y: 300, w: 120, h: 300, text: "ГРИМЕРКА", type: 'door'}
+            }
+        ];
+
+        // Обработка клавиатуры и тач-кнопок
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = true;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = true;
+            if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space') keys.up = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.left = false;
+            if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.right = false;
+            if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.code === 'Space') keys.up = false;
+        });
+
+        function addTouch(id, key) {
+            const el = document.getElementById(id);
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
+            el.addEventListener('touchcancel', (e) => { e.preventDefault(); keys[key] = false; });
+        }
+        addTouch('btn-left', 'left');
+        addTouch('btn-right', 'right');
+        addTouch('btn-jump', 'up');
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            scale = canvas.height / WORLD_HEIGHT;
+        }
+        window.addEventListener('resize', resize);
+
+        function gameLoop(timestamp) {
+            let dt = timestamp - lastTime;
+            lastTime = timestamp;
+
+            if (gameState === 'PLAYING') {
+                update(dt, timestamp);
+                draw(timestamp);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function emitDust(x, y) {
+            particles.push({x: x, y: y, vx: (Math.random()-0.5)*2, vy: Math.random()*-2, life: 1, type: 'dust'});
+        }
+
+        function emitSparkles(x, y) {
+            particles.push({x: x, y: y, vx: (Math.random()-0.5)*4, vy: (Math.random()-0.5)*4, life: 1, type: 'sparkle'});
+        }
+
+        function update(dt, timestamp) {
+            player.velocityY += GRAVITY;
+            player.y += player.velocityY;
+
+            if (keys.up && player.grounded) {
+                player.velocityY = JUMP_POWER;
+                player.grounded = false;
+                // Пыль при прыжке
+                for(let i=0; i<5; i++) emitDust(player.x + player.width/2, player.y + player.height);
+            }
+
+            if (keys.left) player.velocityX -= SPEED;
+            else if (keys.right) player.velocityX += SPEED;
+            
+            player.velocityX *= FRICTION;
+            player.x += player.velocityX;
+
+            // Анимация бега
+            let isMoving = Math.abs(player.velocityX) > 0.5;
+            if (player.grounded && isMoving) {
+                player.animTime += dt;
+                // Пыль при беге
+                if (Math.random() > 0.7) emitDust(player.x + player.width/2, player.y + player.height);
+            } else if (player.grounded) {
+                player.animTime = 0; 
+            }
+
+            // Блестки на 3 уровне
+            if (currentLevelIndex === 2 && isMoving && Math.random() > 0.6) {
+                emitSparkles(player.x + player.width/2, player.y + player.height/2);
+            }
+
+            if (player.x < 0) { player.x = 0; player.velocityX = 0; }
+
+            let currentLevel = levels[currentLevelIndex];
+            player.grounded = false;
+
+            // Столкновения с платформами
+            for (let p of currentLevel.platforms) {
+                if (player.velocityY >= 0 && player.x + player.width > p.x && player.x < p.x + p.w &&
+                    player.y + player.height >= p.y && player.y + player.height - player.velocityY <= p.y + 4) { 
+                    player.y = p.y - player.height;
+                    player.velocityY = 0;
+                    player.grounded = true;
+                }
+            }
+
+            if (player.y > WORLD_HEIGHT + 200) resetPlayer();
+
+            // Логика препятствий
+            for (let obs of currentLevel.obstacles) {
+                if (obs.type === 'moving') {
+                    if (!obs.dir) obs.dir = 1;
+                    obs.x += obs.speed * obs.dir;
+                    if (obs.x > obs.maxX) obs.dir = -1;
+                    if (obs.x < obs.minX) obs.dir = 1;
+                }
+
+                let hitMargin = 10; // Лояльный хитбокс
+                if (player.x + hitMargin < obs.x + obs.w && player.x + player.width - hitMargin > obs.x &&
+                    player.y + hitMargin < obs.y + obs.h && player.y + player.height - hitMargin > obs.y) {
+                    resetPlayer(); 
+                }
+            }
+
+            // Достижение цели
+            let g = currentLevel.goal;
+            if (player.x < g.x + g.w && player.x + player.width > g.x &&
+                player.y < g.y + g.h && player.y + player.height > g.y) {
+                showInfoPlaque();
+            }
+
+            // Обновление частиц
+            for(let i=particles.length-1; i>=0; i--) {
+                let p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.life -= 0.03;
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function drawBackground(ctx, level, camX, timestamp) {
+            ctx.fillStyle = levels[level].bgColor;
+            ctx.fillRect(0, 0, canvas.width/scale, WORLD_HEIGHT);
+
+            if (level === 0) {
+                // Город на фоне
+                ctx.fillStyle = '#1e293b';
+                for(let i=0; i<15; i++) {
+                    let bx = (i * 250 - camX * 0.2) % 3000;
+                    if (bx < -300) bx += 3000;
+                    let bh = 200 + Math.sin(i)*100;
+                    ctx.fillRect(bx, WORLD_HEIGHT - bh - 150, 150, bh);
+                    // Окна
+                    ctx.fillStyle = '#fef08a';
+                    if (i%2===0) ctx.fillRect(bx + 30, WORLD_HEIGHT - bh - 100, 20, 30);
+                    ctx.fillStyle = '#1e293b';
+                }
+            } else if (level === 1) {
+                // Закулисье - балки и тросы
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 5;
+                for(let i=0; i<20; i++) {
+                    let lx = (i * 150 - camX * 0.4) % 3000;
+                    if (lx < -100) lx += 3000;
+                    ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, WORLD_HEIGHT); ctx.stroke();
+                }
+            } else if (level === 2) {
+                // Лазеры и софиты
+                for (let i = 0; i < 6; i++) {
+                    let angle = Math.sin(timestamp * 0.001 + i) * 0.5;
+                    ctx.save();
+                    ctx.translate((i * 400 - camX * 0.1) % 2500, WORLD_HEIGHT);
+                    ctx.rotate(angle);
+                    let grad = ctx.createLinearGradient(0, 0, 0, -WORLD_HEIGHT);
+                    grad.addColorStop(0, `hsla(${i*60 + timestamp*0.05}, 100%, 50%, 0.3)`);
+                    grad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.moveTo(-50, 0); ctx.lineTo(-200, -WORLD_HEIGHT);
+                    ctx.lineTo(200, -WORLD_HEIGHT); ctx.lineTo(50, 0);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+        }
+
+        function draw(timestamp) {
+            let currentLevel = levels[currentLevelIndex];
+            ctx.save();
+            ctx.scale(scale, scale); 
+            
+            let screenWorldWidth = canvas.width / scale;
+            let targetCamX = player.x - screenWorldWidth * 0.3; 
+            if (targetCamX < 0) targetCamX = 0;
+            camera.x += (targetCamX - camera.x) * 0.1;
+
+            // Рисуем фон (с учетом параллакса)
+            drawBackground(ctx, currentLevelIndex, camera.x, timestamp);
+
+            ctx.translate(-camera.x, 0);
+
+            // Отрисовка Платформ
+            for (let p of currentLevel.platforms) {
+                ctx.fillStyle = currentLevel.groundColor;
+                ctx.fillRect(p.x, p.y, p.w, p.h);
+                // Декоративная верхняя кромка
+                ctx.fillStyle = currentLevel.groundTop;
+                ctx.fillRect(p.x, p.y, p.w, 15);
+                // Если сцена (3 уровень), добавляем неоновую полосу
+                if (currentLevelIndex === 2) {
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.fillRect(p.x, p.y+15, p.w, 5);
+                }
+            }
+
+            // Отрисовка Финиша
+            let g = currentLevel.goal;
+            drawGoal(ctx, g, currentLevelIndex, timestamp);
+
+            // Отрисовка Препятствий
+            for (let obs of currentLevel.obstacles) {
+                drawObstacle(ctx, obs, currentLevelIndex, timestamp);
+            }
+
+            // Отрисовка Частиц
+            for(let p of particles) {
+                ctx.globalAlpha = p.life;
+                if(p.type === 'dust') { ctx.fillStyle = '#94a3b8'; ctx.fillRect(p.x, p.y, 6, 6); }
+                if(p.type === 'sparkle') { 
+                    ctx.fillStyle = '#fef08a'; 
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill();
+                }
+            }
+            ctx.globalAlpha = 1;
+
+            // Отрисовка Игрока
+            drawDetailedMichael(ctx, player, currentLevelIndex, timestamp);
+
+            ctx.restore();
+
+            // UI: Название уровня
+            ctx.fillStyle = 'rgba(255,255,255,0.9)';
+            ctx.font = '900 28px Inter, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.shadowColor = 'black'; ctx.shadowBlur = 10;
+            ctx.fillText(currentLevel.name, 30, 50);
+            ctx.shadowBlur = 0;
+        }
+
+        function drawObstacle(ctx, obs, level, timestamp) {
+            if (obs.type === 'trash') {
+                // Детальный мусорный бак
+                ctx.fillStyle = '#64748b';
+                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                ctx.fillStyle = '#475569';
+                for(let i=10; i<obs.h; i+=15) ctx.fillRect(obs.x, obs.y + i, obs.w, 4);
+                // Крышка
+                ctx.fillStyle = '#334155';
+                ctx.beginPath(); ctx.ellipse(obs.x + obs.w/2, obs.y, obs.w/2 + 5, 8, 0, 0, Math.PI*2); ctx.fill();
+                ctx.fillRect(obs.x + obs.w/2 - 5, obs.y - 12, 10, 8); // Ручка
+            } else if (obs.type === 'crate') {
+                // Закулисный ящик для аппаратуры
+                ctx.fillStyle = '#111111';
+                ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
+                // Металлические уголки и края
+                ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 4;
+                ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
+                // Диагональные линии жесткости
+                ctx.beginPath(); ctx.moveTo(obs.x, obs.y); ctx.lineTo(obs.x+obs.w, obs.y+obs.h); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(obs.x+obs.w, obs.y); ctx.lineTo(obs.x, obs.y+obs.h); ctx.stroke();
+            } else if (obs.type === 'moving') {
+                // Анимированный Фанат
+                let bounce = Math.abs(Math.sin(timestamp * 0.01 + obs.x)); 
+                let cx = obs.x + obs.w/2;
+                let headY = obs.y + 15 - bounce * 15;
+                
+                // Руки с плакатом
+                ctx.fillStyle = '#fca5a5';
+                ctx.fillRect(obs.x - 5, headY + 5, 50, 10);
+                // Плакат
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(obs.x - 15, headY - 20, 70, 25);
+                ctx.fillStyle = '#ef4444';
+                ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText("MJ ♥", cx, headY - 3);
+
+                // Голова
+                ctx.fillStyle = '#fca5a5'; 
+                ctx.beginPath(); ctx.arc(cx, headY, 14, 0, Math.PI*2); ctx.fill();
+                // Волосы
+                ctx.fillStyle = '#451a03';
+                ctx.beginPath(); ctx.arc(cx, headY-4, 12, 0, Math.PI, true); ctx.fill();
+                // Тело
+                ctx.fillStyle = '#3b82f6';
+                ctx.fillRect(obs.x + 5, headY + 15, obs.w - 10, obs.h - 15 - (obs.y + obs.h - headY - 15));
+            }
+        }
+
+        function drawGoal(ctx, g, level, timestamp) {
+            ctx.shadowColor = levels[level].goalColor;
+            ctx.shadowBlur = 20 + Math.sin(timestamp*0.005)*10;
+            ctx.fillStyle = levels[level].goalColor;
+
+            if (g.type === 'stage') {
+                ctx.fillRect(g.x, g.y, g.w, g.h);
+                ctx.fillStyle = '#000'; ctx.font = 'bold 24px Inter'; ctx.textAlign = 'center';
+                ctx.save(); ctx.translate(g.x + g.w/2, g.y + g.h/2); ctx.rotate(-Math.PI/2); ctx.fillText(g.text, 0, 0); ctx.restore();
+            } else if (g.type === 'curtain') {
+                ctx.fillRect(g.x, g.y, g.w, g.h);
+                ctx.fillStyle = '#b91c1c'; // Красный занавес
+                ctx.fillRect(g.x, g.y, g.w/3, g.h);
+                ctx.fillRect(g.x + g.w*0.66, g.y, g.w/3, g.h);
+            } else if (g.type === 'door') {
+                ctx.fillRect(g.x, g.y, g.w, g.h);
+                // Звезда на двери
+                ctx.fillStyle = '#fef08a';
+                ctx.shadowBlur = 0;
+                ctx.font = '40px sans-serif'; ctx.textAlign='center';
+                ctx.fillText("⭐", g.x + g.w/2, g.y + g.h/2);
+            }
+            ctx.shadowBlur = 0;
+        }
+
+        function drawLimb(ctx, x, y, angle, length, thickness, color) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(-thickness/2, 0, thickness, length, thickness/2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawDetailedMichael(ctx, p, level, time) {
+            let cycle = p.grounded ? Math.sin(p.animTime * 0.015) : -0.5; // -0.5 это поза в прыжке
+            
+            let cx = p.x + p.width/2;
+            let cy = p.y;
+            
+            // Направление взгляда (поворот)
+            let dir = p.velocityX < -0.1 ? -1 : (p.velocityX > 0.1 ? 1 : p.lastDir);
+            p.lastDir = dir;
+
+            // Цвета в зависимости от уровня
+            const colors = [
+                { skin: '#4A2511', shirt: '#ef4444', pants: '#1e3a8a', shoe: '#111', glove: false, hat: false },
+                { skin: '#6B3A1C', shirt: '#ffffff', pants: '#111111', shoe: '#111', glove: false, hat: false }, // Посветлее
+                { skin: '#fbe6d4', shirt: '#111111', pants: '#111111', shoe: '#111', glove: true, hat: true } // Бледный, пиджак
+            ][level];
+
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(dir, 1); // Отражение при движении влево
+
+            let headY = 15;
+            let bodyY = 30;
+            let armY = 32;
+            let legY = 55;
+
+            // 1. Задняя рука и нога (находятся за телом)
+            let backArmSwing = cycle * 0.8;
+            let backLegSwing = -cycle * 0.8;
+            drawLimb(ctx, 0, legY, backLegSwing, 25, 12, colors.pants); // Задняя нога
+            drawLimb(ctx, 0, armY, backArmSwing, 22, 10, colors.skin); // Задняя рука
+
+            // 2. Туловище
+            ctx.fillStyle = colors.shirt;
+            ctx.beginPath(); ctx.roundRect(-12, bodyY, 24, 28, 6); ctx.fill();
+            if (level === 2) {
+                // Белый вырез на черном пиджаке
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath(); ctx.moveTo(-5, bodyY); ctx.lineTo(5, bodyY); ctx.lineTo(0, bodyY+12); ctx.fill();
+            }
+
+            // 3. Голова
+            ctx.fillStyle = colors.skin;
+            ctx.beginPath(); ctx.arc(0, headY, 15, 0, Math.PI*2); ctx.fill();
+            
+            // Лицо (Глаза)
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(5, headY - 2, 4, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#000000';
+            ctx.beginPath(); ctx.arc(6, headY - 2, 2, 0, Math.PI*2); ctx.fill();
+
+            // Детали Витилиго / Прическа / Шляпа
+            if (level === 0) {
+                // Афро
+                ctx.fillStyle = '#111';
+                ctx.beginPath(); ctx.arc(-2, headY-10, 12, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(8, headY-8, 9, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(-10, headY-2, 10, 0, Math.PI*2); ctx.fill();
+            } else if (level === 1) {
+                // Кудри
+                ctx.fillStyle = '#111';
+                ctx.beginPath(); ctx.arc(2, headY-12, 10, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(-8, headY-6, 8, 0, Math.PI*2); ctx.fill();
+                // Пятна витилиго на лице (Светлые)
+                ctx.fillStyle = '#fbe6d4';
+                ctx.beginPath(); ctx.arc(-4, headY+2, 6, 0, Math.PI*2); ctx.fill(); // Пятно на щеке
+                ctx.beginPath(); ctx.arc(8, headY+5, 4, 0, Math.PI*2); ctx.fill(); // Пятно у подбородка
+            } else if (level === 2) {
+                // Бледное лицо + Федора
+                ctx.fillStyle = '#111';
+                ctx.fillRect(-18, headY - 12, 36, 4); // Поля шляпы
+                ctx.beginPath(); ctx.roundRect(-10, headY - 24, 20, 12, 4); ctx.fill(); // Верх шляпы
+            }
+
+            // 4. Передняя рука и нога (перед телом)
+            let frontArmSwing = -cycle * 0.8;
+            let frontLegSwing = cycle * 0.8;
+            
+            // Передняя нога (с белыми носками для Поп-короля)
+            drawLimb(ctx, 0, legY, frontLegSwing, 25, 12, colors.pants); 
+            if (level === 2) { // Белые носки
+                ctx.save(); ctx.translate(0, legY); ctx.rotate(frontLegSwing);
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(-6, 18, 12, 5);
+                ctx.restore();
+            }
+            
+            // Передняя рука
+            if (level === 1) {
+                // Рука с пятном витилиго
+                drawLimb(ctx, 0, armY, frontArmSwing, 22, 10, colors.skin);
+                ctx.save(); ctx.translate(0, armY); ctx.rotate(frontArmSwing);
+                ctx.fillStyle = '#fbe6d4'; ctx.beginPath(); ctx.arc(0, 15, 5, 0, Math.PI*2); ctx.fill(); // Пятно на руке
+                ctx.restore();
+            } else if (level === 2) {
+                // Рука с Белой Перчаткой!
+                drawLimb(ctx, 0, armY, frontArmSwing, 22, 10, colors.shirt); // Рукав пиджака
+                ctx.save(); ctx.translate(0, armY); ctx.rotate(frontArmSwing);
+                ctx.fillStyle = '#ffffff'; // Перчатка
+                ctx.shadowColor = '#fff'; ctx.shadowBlur = 5; // Свечение перчатки
+                ctx.beginPath(); ctx.roundRect(-5, 16, 10, 8, 4); ctx.fill();
+                ctx.restore();
+            } else {
+                drawLimb(ctx, 0, armY, frontArmSwing, 22, 10, colors.skin);
+            }
+
+            ctx.restore();
+        }
+
+        function resetPlayer() {
+            player.x = 100;
+            player.y = 400;
+            player.velocityX = 0;
+            player.velocityY = 0;
+            player.animTime = 0;
+            particles = [];
+        }
+
+        function loadLevel(index) {
+            currentLevelIndex = index;
+            resetPlayer();
+            gameState = 'PLAYING';
+            camera.x = 0;
+            
+            document.getElementById('start-modal').classList.add('hidden');
+            document.getElementById('info-modal').classList.add('hidden');
+            document.getElementById('end-modal').classList.add('hidden');
+        }
+
+        function showInfoPlaque() {
+            gameState = 'INFO';
+            const data = vitiligoData[currentLevelIndex];
+            document.getElementById('info-title').innerText = data.title;
+            document.getElementById('info-text').innerText = data.content;
+            document.getElementById('info-modal').classList.remove('hidden');
+        }
+
+        function nextLevel() {
+            if (currentLevelIndex < 2) {
+                loadLevel(currentLevelIndex + 1);
+            } else {
+                gameState = 'END';
+                document.getElementById('info-modal').classList.add('hidden');
+                document.getElementById('end-modal').classList.remove('hidden');
+            }
+        }
+
+        document.getElementById('btn-start').addEventListener('click', () => loadLevel(0));
+        document.getElementById('btn-next').addEventListener('click', nextLevel);
+        document.getElementById('btn-restart').addEventListener('click', () => loadLevel(0));
+
+        window.onload = function() {
+            resize();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
